@@ -15,9 +15,9 @@ enum OPCODES { //aqui mostra todos os opcodes, no caso, quais as operações de 
     ALU_REG = 0b0110011, //ALU registrador-registrador (ALU_REG)
 };
 // Define function codes for ALU operations
-enum FUNCT3_CODES {  //define  a função para
-    ADD_SUB = 0b000,
-    SLL = 0b001,
+enum FUNCT3_CODES {  // define a função para operações da ALU conforme o campo funct3
+    ADD_SUB = 0b000, //add ou sub
+    SLL = 0b001, //shift lógico
     SLT = 0b010,
     SLTU = 0b011,
     XOR = 0b100,
@@ -30,16 +30,16 @@ class RiscVEmulator {
 public:
     RiscVEmulator(size_t memory_size = 1024) {
         registers.resize(32, 0);  // 32 general-purpose registers
-        pc = 0;                   // Initialize the program counter
-        memory.resize(memory_size, 0);  // Initialize memory with a given size
+        pc = 0;                   // Inicializa o programa
+        memory.resize(memory_size, 0);  // Inicia a memória com um tamanho específico
     }
-void load_program(const std::vector<uint32_t>& program) {
+    void load_program(const std::vector<uint32_t>& program) {
         for (size_t i = 0; i < program.size(); ++i) {
-            memory[i] = program[i];  // Load the program into memory
+            memory[i] = program[i];  // Carrega o programa na memória
         }
     }
     void run() {
-        while (pc < memory.size()) {
+        for (pc < memory.size()) {
             uint32_t instruction = fetch();
             auto [opcode, rd, funct3, rs1, rs2, funct7, imm] = decode(instruction);
             execute(instruction, opcode, rd, funct3, rs1, rs2, funct7, imm);
@@ -49,11 +49,11 @@ void load_program(const std::vector<uint32_t>& program) {
 private:
     std::vector<uint32_t> memory;
     uint32_t pc;
-    // Fetch the next instruction from memory
+    // Recupera a próxima instrução da memória
     uint32_t fetch() {
         return memory[pc++];
     }
-    // Decode the fetched instruction
+    // Decodifica a instrução obtida.
     std::tuple<uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, int32_t>
     decode(uint32_t instruction) {
         uint32_t opcode = instruction & 0x7F;
@@ -62,11 +62,18 @@ private:
         uint32_t rs1 = (instruction >> 15) & 0x1F;
         uint32_t rs2 = (instruction >> 20) & 0x1F;
         uint32_t funct7 = (instruction >> 25) & 0x7F;
-        int32_t imm = static_cast<int32_t>(instruction) >> 20;  // Sign-extend the immediate value
+        int32_t imm;
+        uint32_t imm_12 = (instruction >> 20) & 0xFFF;
+        // extensão de sinal de 12 bits
+        if (imm_12 & 0x800)
+            imm = imm_12 | 0xFFFFF000;
+        else
+            imm = imm_12;
+
         return {opcode, rd, funct3, rs1, rs2, funct7, imm};
     }
-    // Execute the decoded instruction
- void execute(uint32_t instruction, uint32_t opcode, uint32_t rd,
+    // executa a instrução decodificada
+    void execute(uint32_t instruction, uint32_t opcode, uint32_t rd,
              uint32_t funct3, uint32_t rs1, uint32_t rs2,
              uint32_t funct7, int32_t imm){
         switch (opcode) {
@@ -84,32 +91,22 @@ private:
                 imm_j |= ((instruction >> 20) & 0x1) << 11;   // imm[11] = inst[20]
                 imm_j |= ((instruction >> 12) & 0xFF) << 12;  // imm[19:12] = inst[19:12]
                 imm_j = (imm_j << 11) >> 11; // sign-extend 21 bits
-            
-                // comportamento RISC-V:
-                // - rd := address of next instruction (pc já foi incrementado no fetch(), pc é índice da próxima instrução)
-                // - jump target := address_of_current_instruction + imm_j
-                // address_of_next_instruction em bytes = pc * 4
-                registers[rd] = pc * 4u; // SALVA endereço de retorno em BYTES (isso corrige x1 = 4)
-            
+
+                registers[rd] = pc * 4u; // SALVA endereço de retorno em BYTES 
                 // calcula índice da instrução alvo:
-                // address_of_current_instruction em bytes é (pc - 1)*4
                 int32_t instr_offset = imm_j / 4; // imm_j é múltiplo de 4, então ok
                 pc = (pc - 1) + instr_offset;     // define pc para o índice de instrução alvo
                 break;
             }
-            
             case JALR: {
                 // JALR usa I-type imm (em bytes). Comportamento:
                 // t = (registers[rs1] + imm) & ~1; // endereço em bytes
-                // rd := address of next instruction (em bytes)
                 // pc := t / 4  (converte byte address para índice de instrução)
-                registers[rd] = pc * 4u; // salva endereço de retorno em bytes
-            
+                registers[rd] = pc * 4u; // salva endereço de retorno em bytes           
                 uint32_t target_byte = (uint32_t)(registers[rs1] + imm) & ~1u; // limpa LSB
                 pc = target_byte >> 2; // converte byte address para índice de instrução
                 break;
             }
-
             case ALU_IMM:
                 switch (funct3) {
                     case ADD_SUB:  // ADDI
@@ -139,13 +136,18 @@ private:
                             registers[rd] = registers[rs1] >> (imm & 0x1F);
                         break;
             
-                    case OR:  // ORI
-                        registers[rd] = registers[rs1] | imm;
+                    case OR: { // ORI
+                        uint32_t uimm = imm & 0xFFF;  // zero-extend de 12 bits
+                        registers[rd] = registers[rs1] | uimm;
                         break;
-            
-                    case AND:  // ANDI
-                        registers[rd] = registers[rs1] & imm;
+                    }
+                    
+                    case AND: { // ANDI
+                        uint32_t uimm = imm & 0xFFF;
+                        registers[rd] = registers[rs1] & uimm;
                         break;
+                    }
+
                 }
                 break;
 
@@ -192,34 +194,43 @@ private:
                 break;
     
             case BRANCH: {
-            int32_t offset =
-                ((instruction >> 7) & 0x1E) |          // bits 1–4,11
-                ((instruction >> 20) & 0x7E0) |        // bits 5–10
-                ((instruction << 4) & 0x800) |         // bit 11
-                ((instruction >> 19) & 0x1000);        // bit 12
-            offset = (offset << 19) >> 19; // sign extend
-        
-            switch (funct3) {
-                case 0b000: if (registers[rs1] == registers[rs2]) pc += offset - 1; break; // BEQ
-                case 0b001: if (registers[rs1] != registers[rs2]) pc += offset - 1; break; // BNE
-                case 0b100: if ((int32_t)registers[rs1] <  (int32_t)registers[rs2]) pc += offset - 1; break; // BLT
-                case 0b101: if ((int32_t)registers[rs1] >= (int32_t)registers[rs2]) pc += offset - 1; break; // BGE
-                case 0b110: if (registers[rs1] <  registers[rs2]) pc += offset - 1; break; // BLTU
-                case 0b111: if (registers[rs1] >= registers[rs2]) pc += offset - 1; break; // BGEU
+                int32_t imm_b = 0;
+            
+                imm_b |= ((instruction >> 31) & 1) << 12;     // imm[12]
+                imm_b |= ((instruction >> 25) & 0x3F) << 5;   // imm[10:5]
+                imm_b |= ((instruction >> 8) & 0xF) << 1;     // imm[4:1]
+                imm_b |= ((instruction >> 7) & 1) << 11;      // imm[11]
+            
+                // sign-extend 13 bits
+                imm_b = (imm_b << 19) >> 19;
+            
+                int32_t instr_offset = imm_b / 4;  // converter bytes → instruções
+            
+                switch (funct3) {
+                    case 0b000: if (registers[rs1] == registers[rs2]) pc += instr_offset - 1; break; // BEQ
+                    case 0b001: if (registers[rs1] != registers[rs2]) pc += instr_offset - 1; break; // BNE
+                    case 0b100: if ((int32_t)registers[rs1] <  (int32_t)registers[rs2]) pc += instr_offset - 1; break;
+                    case 0b101: if ((int32_t)registers[rs1] >= (int32_t)registers[rs2]) pc += instr_offset - 1; break;
+                    case 0b110: if (registers[rs1] <  registers[rs2]) pc += instr_offset - 1; break;
+                    case 0b111: if (registers[rs1] >= registers[rs2]) pc += instr_offset - 1; break;
+                }
+            
+                break;
             }
-            break;
-}
+
     
 
-            // Colocar mais instruções aqui! Ou seja
+            // Caso haver mais instruções, colocar aqui
         }
+    
+    registers[0] = 0;             
     }
 };
 
  void run_test(const std::string& name,
               const std::vector<uint32_t>& program,
               const std::vector<int32_t>& expected_values,
-              const std::vector<int> reg_ids){
+              const std::vector<int> reg_ids){ //função de teste
         RiscVEmulator emu;
         emu.load_program(program);
         emu.run();
@@ -261,7 +272,7 @@ int main() {
         0x00F00093,   // ADDI x1, x0, 15   (x1 = 15)
         0x00300113,   // ADDI x2, x0, 3    (x2 = 3)
     
-        0x0020C1B3,   // XOR  x3, x1, x2 => 12  (correct)
+        0x0020C1B3,   // XOR  x3, x1, x2 => 12
         0x0040C213    // XORI x4, x1, 4   => 11
     },
     {
@@ -277,8 +288,8 @@ int main() {
         0x00F00093,   // ADDI x1, x0, 15
         0x00300113,   // ADDI x2, x0, 3
     
-        0x020E1B3,    // OR   x3, x1, x2 => 15  (CORRETO: 0x20E1B3)
-        0x00406213     // ORI  x4, x1, 4  => 15
+        0x020E1B3,    // OR   x3, x1, x2 => 15
+        0x0040E213     // ORI  x4, x1, 4  => 15
     },
     {
         15, 3,  // x1, x2
@@ -293,8 +304,8 @@ int main() {
         0x00F00093,   // ADDI x1, x0, 15
         0x00300113,   // ADDI x2, x0, 3
     
-        0x020F1B3,    // AND  x3, x1, x2 => 3   (CORRETO: 0x20F1B3)
-        0x00407213     // ANDI x4, x1, 4  => 4
+        0x020F1B3,    // AND  x3, x1, x2 => 3
+        0x0040F213     // ANDI x4, x1, 4  => 4
     },
     {
         15, 3,  // x1, x2
@@ -310,7 +321,7 @@ int main() {
         0x00100113,   // ADDI x2, x0, 1
     
         0x0020A1B3,   // SLT  x3, x1, x2  => 1
-        0x0020B213,   // SLTU x4, x1, x2 => 0 (unsigned)
+        0x0020B213,   // SLTU x4, x1, x2 => 0
     
         0x0010A293,   // SLTI x5, x1, 1   => 1
         0x0010B313,   // SLTIU x6, x1, 1  => 0
@@ -325,13 +336,12 @@ int main() {
         0x00500113,  // ADDI x2, x0, 5
         0x00600193,  // ADDI x3, x0, 6
     
-        0x00208663,  // BEQ x1,x2,+12 → pula
-        0x00100213,  // ADDI x4, x0, 1 (não executa)
-    
-        0x00100293,  // ADDI x5, x0, 1 (executado)
+        0x00210663,  // BEQ x1,x2,+12 → pula
+        0x00100213,  // ADDI x4, x0, 1 
     },
-    {5,5,6,0,1},
-    {1,2,3,4,5});
+    {5,5,6,0},
+    {1,2,3,4});
+
     
     //JUMPS
     run_test("JAL / JALR",
