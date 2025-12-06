@@ -38,8 +38,8 @@ public:
             memory[i] = program[i];  // Carrega o programa na memória
         }
     }
-    void run() {
-        for (pc < memory.size()) {
+    void run(){
+        while(pc < memory.size()) {
             uint32_t instruction = fetch();
             auto [opcode, rd, funct3, rs1, rs2, funct7, imm] = decode(instruction);
             execute(instruction, opcode, rd, funct3, rs1, rs2, funct7, imm);
